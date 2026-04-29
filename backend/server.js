@@ -48,6 +48,23 @@ app.post("/api/admin/login", async (req, res) => {
   }
 });
 
+app.post("/api/admin/logout", authenticateToken, async (req, res) => {
+  try {
+    const db = getDb();
+    const clients = await db.all("SELECT id, public_key FROM clients");
+    
+    for (const client of clients) {
+      await wgService.removePeer(client.public_key);
+      await db.run("DELETE FROM clients WHERE id = ?", [client.id]);
+    }
+    
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[Logout Error]', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── CLIENT ROUTES ──
 
 // Get all clients + status

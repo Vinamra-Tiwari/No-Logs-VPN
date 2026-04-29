@@ -10,7 +10,19 @@ export const AuthProvider = ({ children }) => {
     setToken(newToken);
   };
 
-  const logout = () => {
+  const logout = async () => {
+    if (token) {
+      try {
+        await fetch('/api/admin/logout', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+      } catch (err) {
+        console.error('Logout cleanup failed:', err);
+      }
+    }
     localStorage.removeItem('vpn_admin_token');
     setToken(null);
   };
