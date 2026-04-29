@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const crypto = require("crypto");
 const path = require("path");
+const { exec } = require("child_process");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const { initDB, getDb, encrypt, decrypt } = require("./database");
@@ -159,6 +160,35 @@ app.post("/api/clients", authenticateToken, async (req, res) => {
   }
 });
 
+// GET Settings
+app.get("/api/settings", authenticateToken, async (req, res) => {
+  try {
+    const db = getDb();
+    const settingsRows = await db.all("SELECT key, value FROM settings");
+    const settings = {};
+    for (const row of settingsRows) {
+      settings[row.key] = row.value === 'true';
+    }
+    res.json(settings);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST Settings
+app.post("/api/settings", authenticateToken, async (req, res) => {
+  try {
+    const db = getDb();
+    const { key, value } = req.body;
+    if (!key) return res.status(400).json({ error: "Key is required" });
+    
+    await db.run("UPDATE settings SET value = ? WHERE key = ?", [String(value), key]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Re-download client config
 app.get("/api/clients/:id/config", authenticateToken, async (req, res) => {
   try {
@@ -242,6 +272,16 @@ initDB().then(async () => {
 
   app.listen(PORT, () => {
     console.log(`🚀 Nexus VPN Admin Backend running on http://localhost:${PORT}`);
+    
+    // Background Task: Automated Key Rotation
+    setInterval(() => {
+      console.log('[Scheduler] Triggering automated key rotation script...');
+      exec('npm run rotate', { cwd: __dirname }, (error, stdout, stderr) => {
+        if (error) console.error(`[Scheduler] Rotate script failed: ${error.message}`);
+        if (stderr) console.error(`[Scheduler] Rotate stderr: ${stderr}`);
+        console.log(`[Scheduler] Rotate stdout:\n${stdout}`);
+      });
+    }, 60 * 60 * 1000); // 1 hour
   });
 }).catch(err => {
   console.error("Failed to initialize DB:", err);

@@ -54,6 +54,27 @@ async function initDB() {
     // Column already exists
   }
 
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+  `);
+
+  const hasSettings = await db.get("SELECT COUNT(*) as count FROM settings");
+  if (hasSettings.count === 0) {
+    const defaultSettings = [
+      ['killSwitch', 'true'],
+      ['ephemeral', 'true'],
+      ['noLogs', 'true'],
+      ['rotateKeys', 'false'],
+      ['dnsHardening', 'true']
+    ];
+    for (const [k, v] of defaultSettings) {
+      await db.run("INSERT INTO settings (key, value) VALUES (?, ?)", [k, v]);
+    }
+  }
+
   return db;
 }
 

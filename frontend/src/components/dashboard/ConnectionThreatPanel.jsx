@@ -1,7 +1,9 @@
 import { ShieldAlert, ToggleLeft, ToggleRight } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useAuth } from '../../context/AuthContext';
 
 export default function ConnectionThreatPanel() {
+  const { token } = useAuth();
   const [toggles, setToggles] = useState({
     killSwitch: true,
     ephemeral: true,
@@ -10,8 +12,36 @@ export default function ConnectionThreatPanel() {
     dnsHardening: true
   });
 
-  const handleToggle = (key) => {
-    setToggles(prev => ({ ...prev, [key]: !prev[key] }));
+  useEffect(() => {
+    if (!token) return;
+    fetch('/api/settings', {
+      headers: { 'Authorization': `Bearer ${token}` }
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (Object.keys(data).length > 0) {
+          setToggles(data);
+        }
+      })
+      .catch(console.error);
+  }, [token]);
+
+  const handleToggle = async (key) => {
+    const newValue = !toggles[key];
+    setToggles(prev => ({ ...prev, [key]: newValue }));
+    
+    try {
+      await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}` 
+        },
+        body: JSON.stringify({ key, value: newValue })
+      });
+    } catch (err) {
+      console.error('Failed to save setting', err);
+    }
   };
 
   const ToggleItem = ({ label, active, toggleKey }) => (
