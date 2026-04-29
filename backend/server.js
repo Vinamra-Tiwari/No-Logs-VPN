@@ -279,9 +279,17 @@ initDB().then(async () => {
       exec('npm run rotate', { cwd: __dirname }, (error, stdout, stderr) => {
         if (error) console.error(`[Scheduler] Rotate script failed: ${error.message}`);
         if (stderr) console.error(`[Scheduler] Rotate stderr: ${stderr}`);
-        console.log(`[Scheduler] Rotate stdout:\n${stdout}`);
       });
     }, 60 * 60 * 1000); // 1 hour
+
+    // Background Task: Ephemeral Ghost Peer Pruning
+    setInterval(() => {
+      console.log('[Scheduler] Triggering ephemeral pruning script...');
+      exec('npm run clean', { cwd: __dirname }, (error, stdout, stderr) => {
+        if (error) console.error(`[Scheduler] Prune script failed: ${error.message}`);
+      });
+    }, 15 * 60 * 1000); // 15 minutes
+
   });
 }).catch(err => {
   console.error("Failed to initialize DB:", err);
