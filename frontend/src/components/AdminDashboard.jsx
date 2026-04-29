@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Shield, Plus, Trash2, QrCode, Download, Activity, Users, ArrowUpRight, ArrowDownRight, Server, X } from 'lucide-react';
+import { Shield, Plus, Trash2, QrCode, Download, Activity, Users, ArrowUpRight, ArrowDownRight, Server, X, AlertTriangle, Copy, CheckCircle } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -12,6 +12,14 @@ export default function AdminDashboard() {
   const [newClientName, setNewClientName] = useState('');
   const [qrModalData, setQrModalData] = useState(null); // { config, name }
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [toast, setToast] = useState(null);
+  const [copied, setCopied] = useState(false);
+
+  const showToast = (message, type = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 4000);
+  };
 
   const fetchClients = async () => {
     try {
@@ -55,6 +63,7 @@ export default function AdminDashboard() {
     e.preventDefault();
     if (!newClientName) return;
     setLoading(true);
+    setError(null);
     try {
       const res = await fetch('/api/clients', {
         method: 'POST',
@@ -64,16 +73,22 @@ export default function AdminDashboard() {
         },
         body: JSON.stringify({ name: newClientName })
       });
+      const data = await res.json();
       if (res.ok) {
-        const data = await res.json();
         setCreateModalOpen(false);
         setNewClientName('');
         setQrModalData({ config: data.config, name: data.name });
+        showToast(`Client "${data.name}" created successfully`);
         fetchClients();
         fetchStats();
+      } else {
+        setError(data.error || 'Failed to create client');
+        showToast(data.error || 'Failed to create client', 'error');
       }
     } catch (err) {
       console.error(err);
+      setError('Network error: Could not reach the server');
+      showToast('Network error: Could not reach the server', 'error');
     } finally {
       setLoading(false);
     }
@@ -87,11 +102,29 @@ export default function AdminDashboard() {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (res.ok) {
+        showToast('Client revoked successfully');
         fetchClients();
         fetchStats();
       }
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleShowQR = async (id, name) => {
+    try {
+      const res = await fetch(`/api/clients/${id}/config`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setQrModalData({ config: data.config, name });
+      } else {
+        showToast('Failed to fetch client config', 'error');
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('Network error', 'error');
     }
   };
 
@@ -111,9 +144,19 @@ export default function AdminDashboard() {
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
+        showToast(`Config downloaded for ${name}`);
       }
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const handleCopyConfig = () => {
+    if (qrModalData?.config) {
+      navigator.clipboard.writeText(qrModalData.config);
+      setCopied(true);
+      showToast('Config copied to clipboard');
+      setTimeout(() => setCopied(false), 2000);
     }
   };
 
@@ -133,6 +176,28 @@ export default function AdminDashboard() {
 
   return (
     <div className="p-8 max-w-7xl mx-auto">
+      {/* Toast Notification */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: -50, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -50, scale: 0.95 }}
+            className={`fixed top-6 right-6 z-[100] flex items-center gap-3 px-5 py-3 rounded-xl shadow-2xl border backdrop-blur-xl ${
+              toast.type === 'error' 
+                ? 'bg-red-500/10 border-red-500/30 text-red-400' 
+                : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+            }`}
+          >
+            {toast.type === 'error' ? <AlertTriangle className="w-4 h-4" /> : <CheckCircle className="w-4 h-4" />}
+            <span className="text-sm font-medium">{toast.message}</span>
+            <button onClick={() => setToast(null)} className="ml-2 hover:opacity-70">
+              <X className="w-3 h-3" />
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Header */}
       <div className="flex justify-between items-center mb-8">
         <div className="flex items-center gap-4">
@@ -182,7 +247,7 @@ export default function AdminDashboard() {
             <Server className="w-5 h-5 text-slate-400" /> Connected Devices
           </h2>
           <button 
-            onClick={() => setCreateModalOpen(true)}
+            onClick={() => { setCreateModalOpen(true); setError(null); }}
             className="flex items-center gap-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg transition-colors text-sm font-medium shadow-lg shadow-cyan-500/20"
           >
             <Plus className="w-4 h-4" /> Add Client
@@ -226,6 +291,13 @@ export default function AdminDashboard() {
                     </td>
                     <td className="px-6 py-4 flex justify-end gap-3">
                       <button 
+                        onClick={() => handleShowQR(client.id, client.name)}
+                        className="text-slate-400 hover:text-purple-400 transition-colors"
+                        title="Show QR Code"
+                      >
+                        <QrCode className="w-5 h-5" />
+                      </button>
+                      <button 
                         onClick={() => handleDownload(client.id, client.name)}
                         className="text-slate-400 hover:text-cyan-400 transition-colors"
                         title="Download Config"
@@ -260,10 +332,22 @@ export default function AdminDashboard() {
             >
               <div className="flex justify-between items-center mb-6">
                 <h3 className="text-xl font-bold">New Connection Profile</h3>
-                <button onClick={() => setCreateModalOpen(false)} className="text-slate-400 hover:text-white">
+                <button onClick={() => { setCreateModalOpen(false); setError(null); }} className="text-slate-400 hover:text-white">
                   <X className="w-5 h-5" />
                 </button>
               </div>
+
+              {error && (
+                <motion.div 
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: 'auto' }}
+                  className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center gap-2 text-red-400 text-sm"
+                >
+                  <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                  <span>{error}</span>
+                </motion.div>
+              )}
+
               <form onSubmit={handleCreateClient}>
                 <div className="space-y-4">
                   <div>
@@ -282,7 +366,7 @@ export default function AdminDashboard() {
                 <div className="mt-8 flex justify-end gap-3">
                   <button
                     type="button"
-                    onClick={() => setCreateModalOpen(false)}
+                    onClick={() => { setCreateModalOpen(false); setError(null); }}
                     className="px-4 py-2 border border-slate-700 hover:bg-slate-800 rounded-xl transition-colors text-sm"
                   >
                     Cancel
@@ -315,20 +399,33 @@ export default function AdminDashboard() {
                 <QrCode className="w-8 h-8 text-emerald-400" />
               </div>
               <h3 className="text-xl font-bold mb-2">Profile Ready</h3>
-              <p className="text-slate-400 text-sm mb-8">
-                Scan this QR code with the WireGuard app on <strong className="text-white">{qrModalData.name}</strong> to connect.
+              <p className="text-slate-400 text-sm mb-6">
+                Scan this QR code with the <strong className="text-cyan-400">WireGuard app</strong> on <strong className="text-white">{qrModalData.name}</strong> to connect.
               </p>
               
-              <div className="bg-white p-4 rounded-2xl shadow-xl mb-8">
-                <QRCodeSVG value={qrModalData.config} size={200} level="M" />
+              <div className="bg-white p-4 rounded-2xl shadow-xl shadow-cyan-500/10 mb-6">
+                <QRCodeSVG value={qrModalData.config} size={220} level="M" />
               </div>
 
-              <button
-                onClick={() => setQrModalData(null)}
-                className="w-full py-3 bg-slate-800 hover:bg-slate-700 rounded-xl text-white transition-colors font-medium"
-              >
-                Done
-              </button>
+              <p className="text-[11px] text-slate-500 mb-6 leading-relaxed max-w-[280px]">
+                Open WireGuard → Tap "+" → "Scan from QR code" → Point camera at this code
+              </p>
+
+              <div className="flex gap-3 w-full">
+                <button
+                  onClick={handleCopyConfig}
+                  className="flex-1 flex items-center justify-center gap-2 py-3 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-white transition-colors text-sm font-medium"
+                >
+                  {copied ? <CheckCircle className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                  {copied ? 'Copied!' : 'Copy Config'}
+                </button>
+                <button
+                  onClick={() => setQrModalData(null)}
+                  className="flex-1 py-3 bg-cyan-600 hover:bg-cyan-500 rounded-xl text-white transition-colors font-medium text-sm shadow-lg shadow-cyan-500/20"
+                >
+                  Done
+                </button>
+              </div>
             </motion.div>
           </div>
         )}

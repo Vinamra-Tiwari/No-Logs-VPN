@@ -19,9 +19,19 @@ async function runCmd(cmd) {
 
 // Generate new keypair
 async function generateKeys() {
-  const privateKey = await runCmd('wg genkey');
-  const publicKey = await runCmd(`echo "${privateKey}" | wg pubkey`);
-  return { privateKey, publicKey };
+  try {
+    const privateKey = await runCmd('wg genkey');
+    const publicKey = await runCmd(`echo "${privateKey}" | wg pubkey`);
+    return { privateKey, publicKey };
+  } catch (error) {
+    // Fallback: generate keys using Node.js crypto (Curve25519)
+    console.warn("wg tools not available, using crypto fallback for key generation");
+    const crypto = require('crypto');
+    const { publicKey, privateKey } = crypto.generateKeyPairSync('x25519');
+    const privKeyBase64 = privateKey.export({ type: 'pkcs8', format: 'der' }).subarray(-32).toString('base64');
+    const pubKeyBase64 = publicKey.export({ type: 'spki', format: 'der' }).subarray(-32).toString('base64');
+    return { privateKey: privKeyBase64, publicKey: pubKeyBase64 };
+  }
 }
 
 // Parse `wg show wg1` to get client connection status
@@ -118,8 +128,11 @@ PostDown = iptables -t nat -D POSTROUTING -s 10.20.20.0/24 -o wg0 -j MASQUERADE
     const useSudo = process.env.NODE_ENV === 'production' ? 'sudo ' : '';
     await runCmd(`${useSudo}${scriptPath} ${tmpPath} ${WG_CONF_PATH}`);
   } catch (error) {
-    console.error("Failed to sync WG config atomically", error);
-    throw new Error("WireGuard Sync Failed");
+    console.warn("WG config sync skipped (dev mode or no WG interface):", error.message);
+    // In dev mode, don't throw - the DB is already updated
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error("WireGuard Sync Failed");
+    }
   }
 }
 
