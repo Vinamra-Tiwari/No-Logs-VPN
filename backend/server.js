@@ -32,6 +32,26 @@ function authenticateToken(req, res, next) {
   });
 }
 
+function generateWgConfig(privateKey, ip, killSwitch) {
+  let config = `[Interface]
+PrivateKey = ${privateKey}
+Address = ${ip}/32
+DNS = 1.1.1.1
+`;
+  if (killSwitch) {
+    config += `PostUp = iptables -I OUTPUT ! -o %i -m mark ! --mark $(wg show %i fwmark) -m addrtype ! --dst-type LOCAL -j REJECT
+PreDown = iptables -D OUTPUT ! -o %i -m mark ! --mark $(wg show %i fwmark) -m addrtype ! --dst-type LOCAL -j REJECT
+`;
+  }
+  config += `
+[Peer]
+PublicKey = ${process.env.SERVER_PUBLIC_KEY || 'SERVER_PUB_KEY_PLACEHOLDER'}
+AllowedIPs = 0.0.0.0/0
+Endpoint = ${process.env.SERVER_ENDPOINT || 'vpn.example.com:51820'}
+PersistentKeepalive = 25`;
+  return config;
+}
+
 // ── AUTH ROUTES ──
 
 app.post("/api/admin/login", async (req, res) => {
@@ -95,14 +115,11 @@ app.get("/api/clients", authenticateToken, async (req, res) => {
 // Create a new client
 app.post("/api/clients", authenticateToken, async (req, res) => {
   try {
-    const { name } = req.body;
+    const { name, killSwitch } = req.body;
     if (!name) return res.status(400).json({ error: "Name is required" });
 
     const db = getDb();
     
-    // Ensure serial IP allocation by wrapping in a simple lock or doing it sequentially
-    // Since node is single-threaded, if we await the DB fetch and insert, it's fairly safe,
-    // but concurrent requests might cause a race condition. Let's use a transaction-like approach.
     await db.exec('BEGIN EXCLUSIVE TRANSACTION');
     
     const existingClients = await db.all("SELECT ip_address FROM clients");
@@ -111,10 +128,11 @@ app.post("/api/clients", authenticateToken, async (req, res) => {
     const keys = await wgService.generateKeys();
     const id = crypto.randomUUID();
     const encryptedPrivKey = encrypt(keys.privateKey);
+    const isKillSwitch = killSwitch ? 1 : 0;
 
     await db.run(
-      "INSERT INTO clients (id, name, public_key, private_key_enc, ip_address) VALUES (?, ?, ?, ?, ?)",
-      [id, name, keys.publicKey, encryptedPrivKey, ip]
+      "INSERT INTO clients (id, name, public_key, private_key_enc, ip_address, kill_switch) VALUES (?, ?, ?, ?, ?, ?)",
+      [id, name, keys.publicKey, encryptedPrivKey, ip, isKillSwitch]
     );
 
     await db.exec('COMMIT');
@@ -123,16 +141,7 @@ app.post("/api/clients", authenticateToken, async (req, res) => {
     wgService.addPeer(keys.publicKey, ip);
 
     // Provide the config to the frontend just this once
-    const config = `[Interface]
-PrivateKey = ${keys.privateKey}
-Address = ${ip}/32
-DNS = 1.1.1.1
-
-[Peer]
-PublicKey = ${process.env.SERVER_PUBLIC_KEY || 'SERVER_PUB_KEY_PLACEHOLDER'}
-AllowedIPs = 0.0.0.0/0
-Endpoint = ${process.env.SERVER_ENDPOINT || 'vpn.example.com:51820'}
-PersistentKeepalive = 25`;
+    const config = generateWgConfig(keys.privateKey, ip, isKillSwitch);
 
     res.json({
       id,
@@ -158,16 +167,7 @@ app.get("/api/clients/:id/config", authenticateToken, async (req, res) => {
 
     const privateKey = decrypt(client.private_key_enc);
     
-    const config = `[Interface]
-PrivateKey = ${privateKey}
-Address = ${client.ip_address}/32
-DNS = 1.1.1.1
-
-[Peer]
-PublicKey = ${process.env.SERVER_PUBLIC_KEY || 'SERVER_PUB_KEY_PLACEHOLDER'}
-AllowedIPs = 0.0.0.0/0
-Endpoint = ${process.env.SERVER_ENDPOINT || 'vpn.example.com:51820'}
-PersistentKeepalive = 25`;
+    const config = generateWgConfig(privateKey, client.ip_address, client.kill_switch);
 
     res.json({ config });
   } catch (err) {

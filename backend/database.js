@@ -39,11 +39,17 @@ async function initDB() {
       public_key TEXT NOT NULL,
       private_key_enc TEXT NOT NULL,
       ip_address TEXT NOT NULL UNIQUE,
+      kill_switch INTEGER DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       active INTEGER DEFAULT 1
     );
-    -- Note: Optional zero-storage mode in future could make private_key_enc nullable.
   `);
+
+  try {
+    await db.exec("ALTER TABLE clients ADD COLUMN kill_switch INTEGER DEFAULT 0");
+  } catch (e) {
+    // Column already exists
+  }
 
   return db;
 }

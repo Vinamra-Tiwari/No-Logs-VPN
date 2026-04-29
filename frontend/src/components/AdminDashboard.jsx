@@ -10,6 +10,7 @@ export default function AdminDashboard() {
   const [stats, setStats] = useState({ totalClients: 0, activeClients: 0, totalRx: 0, totalTx: 0 });
   const [isCreateModalOpen, setCreateModalOpen] = useState(false);
   const [newClientName, setNewClientName] = useState('');
+  const [killSwitch, setKillSwitch] = useState(false);
   const [qrModalData, setQrModalData] = useState(null); // { config, name }
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -71,12 +72,13 @@ export default function AdminDashboard() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ name: newClientName })
+        body: JSON.stringify({ name: newClientName, killSwitch })
       });
       const data = await res.json();
       if (res.ok) {
         setCreateModalOpen(false);
         setNewClientName('');
+        setKillSwitch(false);
         setQrModalData({ config: data.config, name: data.name });
         showToast(`Client "${data.name}" created successfully`);
         fetchClients();
@@ -362,6 +364,18 @@ export default function AdminDashboard() {
                       autoFocus
                     />
                   </div>
+                  <label className="flex items-center gap-3 p-3 mt-2 rounded-xl border border-slate-800 bg-slate-900 cursor-pointer hover:border-cyan-500/50 transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={killSwitch}
+                      onChange={(e) => setKillSwitch(e.target.checked)}
+                      className="w-4 h-4 rounded text-cyan-500 focus:ring-cyan-500 bg-slate-800 border-slate-700 cursor-pointer"
+                    />
+                    <div className="flex flex-col">
+                      <span className="text-sm font-medium text-white">Enable Kill Switch</span>
+                      <span className="text-xs text-slate-400">Blocks local/non-VPN traffic (Linux clients only).</span>
+                    </div>
+                  </label>
                 </div>
                 <div className="mt-8 flex justify-end gap-3">
                   <button
