@@ -120,6 +120,33 @@ The backend includes powerful administrative scripts:
 - **Authentication:** Admin dashboard access is protected via bcrypt-hashed comparisons and JWT session cookies.
 - **Key Storage:** While private keys are temporarily stored for QR regeneration in the SQLite DB, they are encrypted at rest with a 256-bit application secret, and `.db` files are ignored in version control.
 
+## 📖 Operational Walkthrough
+
+The Nexus VPN dashboard is designed to look like a premium, cinematic "startup-grade" security product while retaining robust technical operations under the hood.
+
+### 1. Provisioning a Client (The Ghost Peer)
+When you click **Add Client**, the Node.js backend:
+- Instantly allocates an available IP from the `/24` subnet.
+- Cryptographically generates a new WireGuard public/private keypair.
+- Sends a `wg set` command to the Vultr VPS to configure the new peer.
+- The UI presents a **QR Code** for instant onboarding. If you selected the **Kill Switch**, a specialized `PostUp`/`PreDown` iptables routing rule is embedded in their config, locking down non-VPN traffic.
+
+### 2. The Threat Matrix & Key Rotation
+The Threat Matrix panel controls global security state:
+- **Rotate Keys (1h):** When armed, the backend's hourly scheduler automatically sweeps through every active client, generates brand new WireGuard keys, and pushes them to the VPS. *Note: Since standard WireGuard clients do not autonomously fetch new keys, clients will be forcefully disconnected until they re-scan the new QR code, enforcing absolute Perfect Forward Secrecy.*
+
+### 3. Ephemeral No-Logs Mode (24h Pruning)
+The platform is fundamentally built as an "Ephemeral" system:
+- When a client is created, a **24-hour countdown** begins (configurable via `EPHEMERAL_HOURS`).
+- A background scheduler runs every 15 minutes, triggering the Ghost Peer Pruning script. 
+- If a client's 24 hours expire, the backend autonomously deletes them from the database and runs `wg set ... remove` to kick them off the server.
+
+### 4. Revoking Access (Instant Destruction)
+When you click the **Revoke** (Trash) icon on a client:
+1. Their row and encrypted private key are permanently deleted from the SQLite database.
+2. The `wg set wg1 peer <public_key> remove` command is fired to the Vultr server, dropping their active tunnel immediately.
+3. Because WireGuard operates in kernel space and holds absolutely no historical traffic logs on disk (only active session bytes in RAM), **every trace of the client vanishes into thin air** the second their peer configuration is destroyed.
+
 ## 📄 License
 
 This project is licensed under the MIT License.
