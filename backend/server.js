@@ -106,7 +106,8 @@ app.get("/api/clients", authenticateToken, async (req, res) => {
       return { ...client, stats };
     });
 
-    res.json({ clients: clientsWithStatus });
+    const ephemeralHours = parseInt(process.env.EPHEMERAL_HOURS || 24, 10);
+    res.json({ clients: clientsWithStatus, ephemeralHours });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

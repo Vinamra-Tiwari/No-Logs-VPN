@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Shield, Plus, Trash2, QrCode, Download, Activity, Users, ArrowUpRight, ArrowDownRight, Server, X, AlertTriangle, Copy, CheckCircle } from 'lucide-react';
+import { Shield, Plus, Trash2, QrCode, Download, Activity, Users, ArrowUpRight, ArrowDownRight, Server, X, AlertTriangle, Copy, CheckCircle, Clock } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -8,6 +8,7 @@ export default function AdminDashboard() {
   const { token, logout } = useAuth();
   const [clients, setClients] = useState([]);
   const [stats, setStats] = useState({ totalClients: 0, activeClients: 0, totalRx: 0, totalTx: 0 });
+  const [ephemeralHours, setEphemeralHours] = useState(24);
   const [isCreateModalOpen, setCreateModalOpen] = useState(false);
   const [newClientName, setNewClientName] = useState('');
   const [killSwitch, setKillSwitch] = useState(false);
@@ -30,6 +31,7 @@ export default function AdminDashboard() {
       if (res.ok) {
         const data = await res.json();
         setClients(data.clients);
+        if (data.ephemeralHours) setEphemeralHours(data.ephemeralHours);
       }
     } catch (err) {
       console.error(err);
@@ -176,6 +178,22 @@ export default function AdminDashboard() {
     return date.toLocaleString();
   };
 
+  const formatTimeLeft = (createdAt) => {
+    if (!createdAt) return '';
+    // SQLite stores in UTC
+    const createdDate = new Date(createdAt + 'Z'); 
+    const expiryDate = new Date(createdDate.getTime() + ephemeralHours * 60 * 60 * 1000);
+    const now = new Date();
+    const diffMs = expiryDate - now;
+    
+    if (diffMs <= 0) return 'Expired';
+    
+    const hours = Math.floor(diffMs / (1000 * 60 * 60));
+    const mins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+    
+    return `${hours}h ${mins}m left`;
+  };
+
   return (
     <div className="p-8 max-w-7xl mx-auto">
       {/* Toast Notification */}
@@ -283,7 +301,15 @@ export default function AdminDashboard() {
                         {client.stats?.online ? 'Online' : 'Offline'}
                       </div>
                     </td>
-                    <td className="px-6 py-4 font-medium text-white">{client.name}</td>
+                    <td className="px-6 py-4">
+                      <div className="flex flex-col">
+                        <span className="font-medium text-white">{client.name}</span>
+                        <span className="flex items-center gap-1 text-[10px] text-amber-500/80 font-mono mt-1 uppercase tracking-wider">
+                          <Clock className="w-3 h-3" />
+                          {formatTimeLeft(client.created_at)}
+                        </span>
+                      </div>
+                    </td>
                     <td className="px-6 py-4 font-mono text-cyan-400">{client.ip_address}</td>
                     <td className="px-6 py-4 text-slate-400">
                       {formatBytes(client.stats?.rx)} / {formatBytes(client.stats?.tx)}
