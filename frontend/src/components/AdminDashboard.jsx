@@ -4,10 +4,17 @@ import { Shield, Plus, Trash2, QrCode, Download, Activity, Users, ArrowUpRight, 
 import { QRCodeSVG } from 'qrcode.react';
 import { motion, AnimatePresence } from 'framer-motion';
 
+import LiveRouteMap from './dashboard/LiveRouteMap';
+import NodeTelemetryMatrix from './dashboard/NodeTelemetryMatrix';
+import TerminalFeed from './dashboard/TerminalFeed';
+import ConnectionThreatPanel from './dashboard/ConnectionThreatPanel';
+import DeviceTable from './dashboard/DeviceTable';
+
 export default function AdminDashboard() {
   const { token, logout } = useAuth();
   const [clients, setClients] = useState([]);
-  const [stats, setStats] = useState({ totalClients: 0, activeClients: 0, totalRx: 0, totalTx: 0 });
+  const [stats, setStats] = useState({ totalClients: 0, activeClients: 0, totalRx: 0, totalTx: 0, entryNode: 'Singapore', exitNode: 'Germany' });
+  const [dataHistory, setDataHistory] = useState([]);
   const [ephemeralHours, setEphemeralHours] = useState(24);
   const [isCreateModalOpen, setCreateModalOpen] = useState(false);
   const [newClientName, setNewClientName] = useState('');
@@ -46,6 +53,13 @@ export default function AdminDashboard() {
       if (res.ok) {
         const data = await res.json();
         setStats(data);
+        const timeStr = new Date().toLocaleTimeString('en-US', { hour12: false });
+        setDataHistory(prev => {
+          const rxMB = parseFloat((data.totalRx / 1024 / 1024).toFixed(2)) || 0;
+          const txMB = parseFloat((data.totalTx / 1024 / 1024).toFixed(2)) || 0;
+          const newHistory = [...prev, { time: timeStr, rx: rxMB, tx: txMB }];
+          return newHistory.slice(-15);
+        });
       }
     } catch (err) {
       console.error(err);
@@ -195,7 +209,7 @@ export default function AdminDashboard() {
   };
 
   return (
-    <div className="p-8 max-w-7xl mx-auto">
+    <div className="min-h-screen bg-[#060911] text-slate-300 font-sans p-4 md:p-8">
       {/* Toast Notification */}
       <AnimatePresence>
         {toast && (
@@ -210,7 +224,7 @@ export default function AdminDashboard() {
             }`}
           >
             {toast.type === 'error' ? <AlertTriangle className="w-4 h-4" /> : <CheckCircle className="w-4 h-4" />}
-            <span className="text-sm font-medium">{toast.message}</span>
+            <span className="text-sm font-medium font-mono">{toast.message}</span>
             <button onClick={() => setToast(null)} className="ml-2 hover:opacity-70">
               <X className="w-3 h-3" />
             </button>
@@ -218,134 +232,55 @@ export default function AdminDashboard() {
         )}
       </AnimatePresence>
 
-      {/* Header */}
-      <div className="flex justify-between items-center mb-8">
-        <div className="flex items-center gap-4">
-          <div className="w-12 h-12 bg-gradient-to-br from-cyan-500 to-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-cyan-500/20">
-            <Shield className="w-6 h-6 text-white" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold">Nexus Gateway</h1>
-            <div className="flex items-center gap-2 text-sm text-slate-400">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></span>
-              Singapore Entry Node
-            </div>
-          </div>
-        </div>
-        <button 
-          onClick={logout}
-          className="px-4 py-2 text-sm text-slate-300 hover:text-white border border-slate-700 hover:border-slate-500 rounded-lg transition-colors"
-        >
-          Disconnect
-        </button>
-      </div>
-
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-        {[
-          { label: 'Total Clients', value: stats.totalClients, icon: Users, color: 'text-blue-400', bg: 'bg-blue-500/10' },
-          { label: 'Active Tunnels', value: stats.activeClients, icon: Activity, color: 'text-emerald-400', bg: 'bg-emerald-500/10' },
-          { label: 'Data Down', value: formatBytes(stats.totalRx), icon: ArrowDownRight, color: 'text-cyan-400', bg: 'bg-cyan-500/10' },
-          { label: 'Data Up', value: formatBytes(stats.totalTx), icon: ArrowUpRight, color: 'text-purple-400', bg: 'bg-purple-500/10' },
-        ].map((stat, i) => (
-          <div key={i} className="backdrop-blur-xl bg-slate-900/60 border border-slate-800 rounded-2xl p-6 shadow-xl flex items-center gap-4">
-            <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${stat.bg}`}>
-              <stat.icon className={`w-6 h-6 ${stat.color}`} />
+      <div className="max-w-[1400px] mx-auto space-y-6">
+        {/* Header */}
+        <div className="flex justify-between items-center bg-slate-900/40 border border-slate-800/60 rounded-2xl p-4 backdrop-blur-xl">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 bg-cyan-500/10 rounded-xl flex items-center justify-center border border-cyan-500/30 shadow-[0_0_20px_rgba(6,182,212,0.15)]">
+              <Shield className="w-6 h-6 text-cyan-400" />
             </div>
             <div>
-              <p className="text-sm text-slate-400">{stat.label}</p>
-              <p className="text-2xl font-bold">{stat.value}</p>
+              <h1 className="text-xl font-bold text-white tracking-wide">NEXUS<span className="font-light text-cyan-400">GATEWAY</span></h1>
+              <div className="flex items-center gap-2 text-xs text-slate-500 font-mono mt-0.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)] animate-pulse"></span>
+                SECURE ADMIN SESSION
+              </div>
             </div>
           </div>
-        ))}
-      </div>
-
-      {/* Client List Section */}
-      <div className="backdrop-blur-xl bg-slate-900/60 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
-        <div className="p-6 border-b border-slate-800 flex justify-between items-center">
-          <h2 className="text-lg font-semibold flex items-center gap-2">
-            <Server className="w-5 h-5 text-slate-400" /> Connected Devices
-          </h2>
           <button 
-            onClick={() => { setCreateModalOpen(true); setError(null); }}
-            className="flex items-center gap-2 px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-lg transition-colors text-sm font-medium shadow-lg shadow-cyan-500/20"
+            onClick={logout}
+            className="px-4 py-2 text-xs font-mono text-slate-400 hover:text-white border border-slate-700 hover:border-slate-500 rounded-lg transition-colors uppercase tracking-wider"
           >
-            <Plus className="w-4 h-4" /> Add Client
+            Disconnect
           </button>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm text-left">
-            <thead className="text-xs text-slate-400 uppercase bg-slate-900/50">
-              <tr>
-                <th className="px-6 py-4">Status</th>
-                <th className="px-6 py-4">Name</th>
-                <th className="px-6 py-4">IP Address</th>
-                <th className="px-6 py-4">Transfer (↓/↑)</th>
-                <th className="px-6 py-4">Last Seen</th>
-                <th className="px-6 py-4 text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {clients.length === 0 ? (
-                <tr>
-                  <td colSpan="6" className="px-6 py-8 text-center text-slate-500">
-                    No clients provisioned yet.
-                  </td>
-                </tr>
-              ) : (
-                clients.map((client) => (
-                  <tr key={client.id} className="border-b border-slate-800 hover:bg-slate-800/30 transition-colors">
-                    <td className="px-6 py-4">
-                      <div className="flex items-center gap-2">
-                        <span className={`w-2 h-2 rounded-full ${client.stats?.online ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-slate-600'}`}></span>
-                        {client.stats?.online ? 'Online' : 'Offline'}
-                      </div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="flex flex-col">
-                        <span className="font-medium text-white">{client.name}</span>
-                        <span className="flex items-center gap-1 text-[10px] text-amber-500/80 font-mono mt-1 uppercase tracking-wider">
-                          <Clock className="w-3 h-3" />
-                          {formatTimeLeft(client.created_at)}
-                        </span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 font-mono text-cyan-400">{client.ip_address}</td>
-                    <td className="px-6 py-4 text-slate-400">
-                      {formatBytes(client.stats?.rx)} / {formatBytes(client.stats?.tx)}
-                    </td>
-                    <td className="px-6 py-4 text-slate-400 text-xs">
-                      {formatTime(client.stats?.latestHandshake)}
-                    </td>
-                    <td className="px-6 py-4 flex justify-end gap-3">
-                      <button 
-                        onClick={() => handleShowQR(client.id, client.name)}
-                        className="text-slate-400 hover:text-purple-400 transition-colors"
-                        title="Show QR Code"
-                      >
-                        <QrCode className="w-5 h-5" />
-                      </button>
-                      <button 
-                        onClick={() => handleDownload(client.id, client.name)}
-                        className="text-slate-400 hover:text-cyan-400 transition-colors"
-                        title="Download Config"
-                      >
-                        <Download className="w-5 h-5" />
-                      </button>
-                      <button 
-                        onClick={() => handleRevoke(client.id)}
-                        className="text-slate-400 hover:text-red-400 transition-colors"
-                        title="Revoke Access"
-                      >
-                        <Trash2 className="w-5 h-5" />
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+
+        {/* Centerpiece Map */}
+        <LiveRouteMap entryNode={stats.entryNode} exitNode={stats.exitNode} />
+
+        {/* Telemetry Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-1 h-[360px]">
+            <ConnectionThreatPanel />
+          </div>
+          <div className="lg:col-span-1 h-[360px]">
+            <NodeTelemetryMatrix dataHistory={dataHistory} />
+          </div>
+          <div className="lg:col-span-1 h-[360px]">
+            <TerminalFeed clients={clients} />
+          </div>
         </div>
+
+        {/* Connected Devices Table */}
+        <DeviceTable 
+          clients={clients}
+          onShowQR={handleShowQR}
+          onDownload={handleDownload}
+          onRevoke={handleRevoke}
+          onAddClient={() => { setCreateModalOpen(true); setError(null); }}
+          formatTimeLeft={formatTimeLeft}
+          formatBytes={formatBytes}
+        />
       </div>
 
       {/* Create Modal */}

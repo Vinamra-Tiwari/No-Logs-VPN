@@ -12,6 +12,10 @@ export default {
         danger: "#FF3B6B",
         warning: "#FFB800",
       },
+      fontFamily: {
+        sans: ['Inter', 'sans-serif'],
+        mono: ['JetBrains Mono', 'monospace'],
+      },
       animation: {
         'shimmer': 'shimmer 2s infinite',
       },

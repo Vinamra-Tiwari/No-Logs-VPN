@@ -220,7 +220,9 @@ app.get("/api/stats", authenticateToken, async (req, res) => {
       activeClients: activeCount,
       totalRx,
       totalTx,
-      timestamp: Date.now()
+      timestamp: Date.now(),
+      entryNode: process.env.ENTRY_NODE || 'Singapore',
+      exitNode: process.env.EXIT_NODE || 'Germany'
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
