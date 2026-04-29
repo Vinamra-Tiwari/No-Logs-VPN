@@ -22,6 +22,28 @@ async function runEphemeralCleanup() {
         await db.run("DELETE FROM clients WHERE id = ?", [client.id]);
       }
     }
+
+    // --- Ghost Peer Pruning ---
+    // Fetch all valid clients currently in the DB
+    const allClients = await db.all("SELECT public_key FROM clients");
+    const validPubKeys = new Set(allClients.map(c => c.public_key));
+
+    // Fetch live peers from the Vultr WireGuard interface
+    const livePeersMap = await wgService.parseWgShow('wg1');
+    let ghostsRemoved = 0;
+
+    for (const [livePubKey] of livePeersMap.entries()) {
+      // If a peer is active on Vultr but missing from our DB, it's a ghost.
+      if (!validPubKeys.has(livePubKey)) {
+        await wgService.removePeer(livePubKey);
+        ghostsRemoved++;
+      }
+    }
+
+    if (ghostsRemoved > 0) {
+      console.log(`[Ephemeral] Pruned ${ghostsRemoved} ghost peer(s) from Vultr.`);
+    }
+
   } catch (err) {
     console.error('[Ephemeral Error]', err.message);
   } finally {
