@@ -59,10 +59,6 @@ export default function TerminalFeed({ clients }) {
     prevClientsRef.current = clients;
   }, [clients]);
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [logs]);
-
   return (
     <div className="backdrop-blur-xl bg-slate-900/60 border border-slate-800 rounded-2xl shadow-xl p-6 h-full flex flex-col">
       <div className="flex items-center gap-2 mb-4 pb-4 border-b border-slate-800/50">

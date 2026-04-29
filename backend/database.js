@@ -26,10 +26,13 @@ function decrypt(text) {
 
 let db;
 
+const path = require('path');
+
 async function initDB() {
   db = await open({
-    filename: './vpn.db',
-    driver: sqlite3.Database
+    filename: path.join(__dirname, 'vpn.db'),
+    driver: sqlite3.Database,
+    mode: sqlite3.OPEN_READWRITE | sqlite3.OPEN_CREATE
   });
 
   await db.exec(`
