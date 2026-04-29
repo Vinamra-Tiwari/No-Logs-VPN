@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "cd ../frontend && npm install && npm run build && cd ../backend && node server.js",
+    "clean": "node scripts/ephemeral.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

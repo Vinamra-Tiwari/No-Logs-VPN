@@ -50,7 +50,6 @@ async function generateKeys() {
 // ── Add a peer to the VPS WireGuard interface ──
 async function addPeer(publicKey, ipAddress) {
   if (!VPS_HOST) {
-    console.warn('[wgService] VPS_HOST not set — skipping remote peer add (dev mode)');
     return;
   }
 
@@ -59,9 +58,8 @@ async function addPeer(publicKey, ipAddress) {
     await runRemote(`sudo wg set ${WG_INTERFACE} peer ${publicKey} allowed-ips ${ipAddress}/32`);
     // Persist to config file so it survives reboots
     await runRemote(`sudo wg-quick save ${WG_INTERFACE}`);
-    console.log(`[wgService] ✓ Peer added on VPS: ${publicKey.substring(0, 16)}... → ${ipAddress}`);
   } catch (error) {
-    console.error(`[wgService] ✗ Failed to add peer on VPS: ${error.message}`);
+    console.error(`[Error] WG Add: ${error.message}`);
     // Don't throw — the client is already saved in DB, user can still get the QR code
   }
 }
@@ -69,16 +67,14 @@ async function addPeer(publicKey, ipAddress) {
 // ── Remove a peer from the VPS WireGuard interface ──
 async function removePeer(publicKey) {
   if (!VPS_HOST) {
-    console.warn('[wgService] VPS_HOST not set — skipping remote peer removal (dev mode)');
     return;
   }
 
   try {
     await runRemote(`sudo wg set ${WG_INTERFACE} peer ${publicKey} remove`);
     await runRemote(`sudo wg-quick save ${WG_INTERFACE}`);
-    console.log(`[wgService] ✓ Peer removed on VPS: ${publicKey.substring(0, 16)}...`);
   } catch (error) {
-    console.error(`[wgService] ✗ Failed to remove peer from VPS: ${error.message}`);
+    console.error(`[Error] WG Remove: ${error.message}`);
   }
 }
 
