@@ -1,18 +1,36 @@
 const { exec } = require('child_process');
 const util = require('util');
-const fs = require('fs').promises;
-const path = require('path');
 const execPromise = util.promisify(exec);
 
-const WG_CONF_PATH = process.env.WG_CONF_PATH || '/etc/wireguard/wg1.conf';
+require('dotenv').config();
 
-// Executes a shell command
+// ── Config from .env ──
+const VPS_HOST = process.env.VPS_HOST || '';
+const VPS_USER = process.env.VPS_USER || 'root';
+const VPS_SSH_KEY = process.env.VPS_SSH_KEY || '';
+const WG_INTERFACE = process.env.WG_INTERFACE || 'wg1';
+
+// ── Helper: run local command ──
 async function runCmd(cmd) {
   const { stdout } = await execPromise(cmd);
   return stdout.trim();
 }
 
-// Generate new keypair
+// ── Helper: run command on VPS via SSH ──
+function buildSSHPrefix() {
+  const keyPart = VPS_SSH_KEY ? `-i ${VPS_SSH_KEY} ` : '';
+  return `ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 -o BatchMode=yes ${keyPart}${VPS_USER}@${VPS_HOST}`;
+}
+
+async function runRemote(remoteCmd) {
+  if (!VPS_HOST) {
+    throw new Error('VPS_HOST not configured');
+  }
+  const fullCmd = `${buildSSHPrefix()} "${remoteCmd}"`;
+  return runCmd(fullCmd);
+}
+
+// ── Generate WireGuard keypair ──
 async function generateKeys() {
   try {
     const privateKey = await runCmd('wg genkey');
@@ -20,134 +38,107 @@ async function generateKeys() {
     return { privateKey, publicKey };
   } catch (error) {
     // Fallback: generate keys using Node.js crypto (Curve25519)
-    console.warn("wg tools not available, using crypto fallback for key generation");
+    console.warn("[wgService] wg tools not available locally, using crypto fallback");
     const crypto = require('crypto');
-    const { publicKey, privateKey } = crypto.generateKeyPairSync('x25519');
-    const privKeyBase64 = privateKey.export({ type: 'pkcs8', format: 'der' }).subarray(-32).toString('base64');
-    const pubKeyBase64 = publicKey.export({ type: 'spki', format: 'der' }).subarray(-32).toString('base64');
+    const keyPair = crypto.generateKeyPairSync('x25519');
+    const privKeyBase64 = keyPair.privateKey.export({ type: 'pkcs8', format: 'der' }).subarray(-32).toString('base64');
+    const pubKeyBase64 = keyPair.publicKey.export({ type: 'spki', format: 'der' }).subarray(-32).toString('base64');
     return { privateKey: privKeyBase64, publicKey: pubKeyBase64 };
   }
 }
 
-// Track whether we've already warned about missing WG interface (avoids log spam)
+// ── Add a peer to the VPS WireGuard interface ──
+async function addPeer(publicKey, ipAddress) {
+  if (!VPS_HOST) {
+    console.warn('[wgService] VPS_HOST not set — skipping remote peer add (dev mode)');
+    return;
+  }
+
+  try {
+    // Add peer to the live WireGuard interface
+    await runRemote(`sudo wg set ${WG_INTERFACE} peer ${publicKey} allowed-ips ${ipAddress}/32`);
+    // Persist to config file so it survives reboots
+    await runRemote(`sudo wg-quick save ${WG_INTERFACE}`);
+    console.log(`[wgService] ✓ Peer added on VPS: ${publicKey.substring(0, 16)}... → ${ipAddress}`);
+  } catch (error) {
+    console.error(`[wgService] ✗ Failed to add peer on VPS: ${error.message}`);
+    // Don't throw — the client is already saved in DB, user can still get the QR code
+  }
+}
+
+// ── Remove a peer from the VPS WireGuard interface ──
+async function removePeer(publicKey) {
+  if (!VPS_HOST) {
+    console.warn('[wgService] VPS_HOST not set — skipping remote peer removal (dev mode)');
+    return;
+  }
+
+  try {
+    await runRemote(`sudo wg set ${WG_INTERFACE} peer ${publicKey} remove`);
+    await runRemote(`sudo wg-quick save ${WG_INTERFACE}`);
+    console.log(`[wgService] ✓ Peer removed on VPS: ${publicKey.substring(0, 16)}...`);
+  } catch (error) {
+    console.error(`[wgService] ✗ Failed to remove peer from VPS: ${error.message}`);
+  }
+}
+
+// ── Track wg show warning (log once, not every 10s) ──
 let _wgShowWarned = false;
 
-// Parse `wg show wg1` to get client connection status
-async function parseWgShow(interfaceName = 'wg1') {
+// ── Parse live peer status from VPS ──
+async function parseWgShow(interfaceName) {
+  interfaceName = interfaceName || WG_INTERFACE;
+
   try {
-    const stdout = await runCmd(`sudo wg show ${interfaceName} dump`);
+    let stdout;
+    if (VPS_HOST) {
+      stdout = await runRemote(`sudo wg show ${interfaceName} dump`);
+    } else {
+      stdout = await runCmd(`sudo wg show ${interfaceName} dump`);
+    }
+
     const lines = stdout.split('\n');
     const statusMap = new Map();
 
-    // The dump format for peers:
-    // interface, public-key, preshared-key, endpoint, allowed-ips, latest-handshake, transfer-rx, transfer-tx, persistent-keepalive
-    // Note: the first line is usually the interface itself
-    for (const line of lines) {
-      const parts = line.split('\t');
-      if (parts.length >= 8 && parts[0] === interfaceName) {
-        const publicKey = parts[1];
-        const latestHandshake = parseInt(parts[5], 10);
-        const rx = parseInt(parts[6], 10);
-        const tx = parseInt(parts[7], 10);
-        
+    // dump format: public-key, preshared-key, endpoint, allowed-ips, latest-handshake, transfer-rx, transfer-tx, persistent-keepalive
+    // First line is the interface itself (skip it), peer lines follow
+    for (let i = 1; i < lines.length; i++) {
+      const parts = lines[i].split('\t');
+      if (parts.length >= 7) {
+        const publicKey = parts[0];
+        const latestHandshake = parseInt(parts[4], 10);
+        const rx = parseInt(parts[5], 10);
+        const tx = parseInt(parts[6], 10);
+
         statusMap.set(publicKey, {
           latestHandshake,
           rx,
           tx,
-          // Consider online if handshake is within last 3 minutes (180 seconds)
           online: (Date.now() / 1000) - latestHandshake < 180 && latestHandshake > 0
         });
       }
     }
-    _wgShowWarned = false; // reset on success
+    _wgShowWarned = false;
     return statusMap;
   } catch (err) {
     if (!_wgShowWarned) {
-      console.warn(`[wgService] WireGuard interface '${interfaceName}' not available — client status will show as offline.`);
+      const where = VPS_HOST ? `VPS (${VPS_HOST})` : 'localhost';
+      console.warn(`[wgService] WireGuard interface '${interfaceName}' not reachable on ${where} — client status will show as offline.`);
       _wgShowWarned = true;
     }
     return new Map();
   }
 }
 
-// Re-generate configuration and sync it atomically
-async function syncConfig(clients) {
-  // We need the base configuration (Interface section)
-  // To avoid modifying the interface block, we'll read it from the existing config or a template.
-  let baseConfig = '';
-  try {
-    const currentConf = await fs.readFile(WG_CONF_PATH, 'utf8');
-    // Extract everything up to the first [Peer]
-    const peerIndex = currentConf.indexOf('[Peer]');
-    if (peerIndex !== -1) {
-      baseConfig = currentConf.substring(0, peerIndex).trim();
-    } else {
-      baseConfig = currentConf.trim();
-    }
-  } catch (error) {
-    console.warn(`Could not read base config from ${WG_CONF_PATH}. Using fallback template.`);
-    baseConfig = `[Interface]
-Address = 10.20.20.1/24
-ListenPort = 51821
-PrivateKey = ${process.env.SERVER_PRIVATE_KEY || 'SERVER_PRIVATE_KEY_PLACEHOLDER'}
-
-PostUp = ip rule add iif wg1 lookup multihop priority 1000
-PostUp = ip route add default dev wg0 table multihop
-PostUp = iptables -A FORWARD -i wg1 -o wg0 -j ACCEPT
-PostUp = iptables -A FORWARD -i wg0 -o wg1 -m state --state RELATED,ESTABLISHED -j ACCEPT
-PostUp = iptables -t nat -A POSTROUTING -s 10.20.20.0/24 -o wg0 -j MASQUERADE
-
-PostDown = ip rule del iif wg1 lookup multihop priority 1000
-PostDown = ip route flush table multihop
-PostDown = iptables -D FORWARD -i wg1 -o wg0 -j ACCEPT
-PostDown = iptables -D FORWARD -i wg0 -o wg1 -m state --state RELATED,ESTABLISHED -j ACCEPT
-PostDown = iptables -t nat -D POSTROUTING -s 10.20.20.0/24 -o wg0 -j MASQUERADE
-`;
-  }
-
-  // Generate Peer blocks
-  let peersConfig = '';
-  for (const client of clients) {
-    if (client.active) {
-      peersConfig += `\n\n[Peer]\nPublicKey = ${client.public_key}\nAllowedIPs = ${client.ip_address}/32`;
-    }
-  }
-
-  const newConfigData = baseConfig + '\n' + peersConfig + '\n';
-  const tmpPath = `${WG_CONF_PATH}.tmp`;
-  
-  await fs.writeFile(tmpPath, newConfigData, { mode: 0o600 });
-
-  // Execute sync script using sudo (assuming sudo rule is setup for sync_wg.sh)
-  const scriptPath = path.join(__dirname, 'scripts', 'sync_wg.sh');
-  // Make sure it's executable
-  await runCmd(`chmod +x ${scriptPath}`);
-  
-  try {
-    // If not in production/root, we might just run the script directly if it has permissions,
-    // or run via sudo if rules are configured.
-    const useSudo = process.env.NODE_ENV === 'production' ? 'sudo ' : '';
-    await runCmd(`${useSudo}${scriptPath} ${tmpPath} ${WG_CONF_PATH}`);
-  } catch (error) {
-    console.warn("WG config sync skipped (dev mode or no WG interface):", error.message);
-    // In dev mode, don't throw - the DB is already updated
-    if (process.env.NODE_ENV === 'production') {
-      throw new Error("WireGuard Sync Failed");
-    }
-  }
-}
-
-// Utility to find next available IP
+// ── Allocate next available IP ──
 function allocateIp(clients) {
-  // Reserved 10.20.20.1 for Gateway
-  // Format: 10.20.20.x
   const usedLastOctets = clients
     .map(c => c.ip_address)
     .filter(ip => ip && ip.startsWith('10.20.20.'))
     .map(ip => parseInt(ip.split('.')[3], 10))
     .filter(num => !isNaN(num));
 
-  let nextOctet = 2; // Start from 2
+  let nextOctet = 2; // .1 is the gateway
   while (usedLastOctets.includes(nextOctet) && nextOctet <= 254) {
     nextOctet++;
   }
@@ -159,9 +150,39 @@ function allocateIp(clients) {
   return `10.20.20.${nextOctet}`;
 }
 
+// ── Auto-fetch server public key from VPS on startup ──
+async function autoFetchServerKey() {
+  const current = process.env.SERVER_PUBLIC_KEY || '';
+  // If key is already set to a real value, skip
+  if (current && !current.includes('PASTE') && !current.includes('PLACEHOLDER') && current.length === 44) {
+    console.log(`[wgService] Server public key already configured: ${current.substring(0, 16)}...`);
+    return;
+  }
+
+  if (!VPS_HOST) {
+    console.warn('[wgService] VPS_HOST not set — cannot auto-fetch server public key. QR codes will have a placeholder key.');
+    return;
+  }
+
+  try {
+    const pubKey = await runRemote(`sudo wg show ${WG_INTERFACE} public-key`);
+    if (pubKey && pubKey.length === 44) {
+      process.env.SERVER_PUBLIC_KEY = pubKey;
+      console.log(`[wgService] ✓ Auto-fetched server public key from VPS: ${pubKey.substring(0, 16)}...`);
+    } else {
+      console.warn(`[wgService] Got unexpected key from VPS: "${pubKey}"`);
+    }
+  } catch (error) {
+    console.error(`[wgService] ✗ Could not fetch server public key from VPS: ${error.message}`);
+    console.error('[wgService]   → Make sure SSH access works: ssh ' + VPS_USER + '@' + VPS_HOST + ' "sudo wg show ' + WG_INTERFACE + ' public-key"');
+  }
+}
+
 module.exports = {
   generateKeys,
+  addPeer,
+  removePeer,
   parseWgShow,
-  syncConfig,
-  allocateIp
+  allocateIp,
+  autoFetchServerKey
 };

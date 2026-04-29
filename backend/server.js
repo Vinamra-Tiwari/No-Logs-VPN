@@ -100,11 +100,10 @@ app.post("/api/clients", authenticateToken, async (req, res) => {
       [id, name, keys.publicKey, encryptedPrivKey, ip]
     );
 
-    const allClients = await db.all("SELECT public_key, ip_address, active FROM clients");
     await db.exec('COMMIT');
 
-    // Sync WG config
-    await wgService.syncConfig(allClients);
+    // Add peer to VPS WireGuard (non-blocking — won't fail the response)
+    wgService.addPeer(keys.publicKey, ip);
 
     // Provide the config to the frontend just this once
     const config = `[Interface]
@@ -163,11 +162,14 @@ PersistentKeepalive = 25`;
 app.delete("/api/clients/:id", authenticateToken, async (req, res) => {
   try {
     const db = getDb();
-    // For MVP, we completely remove the client, or we could mark active=0. Let's delete.
+    // Fetch client first to get its public key for WG removal
+    const client = await db.get("SELECT public_key FROM clients WHERE id = ?", [req.params.id]);
+    if (!client) return res.status(404).json({ error: "Client not found" });
+
     await db.run("DELETE FROM clients WHERE id = ?", [req.params.id]);
     
-    const allClients = await db.all("SELECT public_key, ip_address, active FROM clients");
-    await wgService.syncConfig(allClients);
+    // Remove peer from VPS WireGuard
+    wgService.removePeer(client.public_key);
     
     res.json({ success: true });
   } catch (err) {
@@ -214,7 +216,10 @@ app.use((req, res) => {
 
 const PORT = process.env.PORT || 5000;
 
-initDB().then(() => {
+initDB().then(async () => {
+  // Auto-fetch server public key from VPS if not already configured
+  await wgService.autoFetchServerKey();
+
   app.listen(PORT, () => {
     console.log(`🚀 Nexus VPN Admin Backend running on http://localhost:${PORT}`);
   });
