@@ -1,0 +1,21 @@
+[Interface]
+Address = 10.20.20.1/24
+ListenPort = 51821
+PrivateKey = SERVER_PRIVATE_KEY_PLACEHOLDER
+
+PostUp = ip rule add iif wg1 lookup multihop priority 1000
+PostUp = ip route add default dev wg0 table multihop
+PostUp = iptables -A FORWARD -i wg1 -o wg0 -j ACCEPT
+PostUp = iptables -A FORWARD -i wg0 -o wg1 -m state --state RELATED,ESTABLISHED -j ACCEPT
+PostUp = iptables -t nat -A POSTROUTING -s 10.20.20.0/24 -o wg0 -j MASQUERADE
+
+PostDown = ip rule del iif wg1 lookup multihop priority 1000
+PostDown = ip route flush table multihop
+PostDown = iptables -D FORWARD -i wg1 -o wg0 -j ACCEPT
+PostDown = iptables -D FORWARD -i wg0 -o wg1 -m state --state RELATED,ESTABLISHED -j ACCEPT
+PostDown = iptables -t nat -D POSTROUTING -s 10.20.20.0/24 -o wg0 -j MASQUERADE
+
+
+[Peer]
+PublicKey = IhWZc56UAlXP1j8PkaJJm1CQ9fJ/ZOwgz2NlYh2hXns=
+AllowedIPs = 10.20.20.2/32

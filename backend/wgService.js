@@ -8,13 +8,8 @@ const WG_CONF_PATH = process.env.WG_CONF_PATH || '/etc/wireguard/wg1.conf';
 
 // Executes a shell command
 async function runCmd(cmd) {
-  try {
-    const { stdout } = await execPromise(cmd);
-    return stdout.trim();
-  } catch (error) {
-    console.error(`Error executing command: ${cmd}`, error);
-    throw error;
-  }
+  const { stdout } = await execPromise(cmd);
+  return stdout.trim();
 }
 
 // Generate new keypair
@@ -34,10 +29,12 @@ async function generateKeys() {
   }
 }
 
+// Track whether we've already warned about missing WG interface (avoids log spam)
+let _wgShowWarned = false;
+
 // Parse `wg show wg1` to get client connection status
 async function parseWgShow(interfaceName = 'wg1') {
   try {
-    // Attempt to run wg show, gracefully fallback if it fails (e.g., local dev without root)
     const stdout = await runCmd(`sudo wg show ${interfaceName} dump`);
     const lines = stdout.split('\n');
     const statusMap = new Map();
@@ -62,9 +59,13 @@ async function parseWgShow(interfaceName = 'wg1') {
         });
       }
     }
+    _wgShowWarned = false; // reset on success
     return statusMap;
   } catch (err) {
-    console.warn("Could not read wg show status, returning empty map.", err.message);
+    if (!_wgShowWarned) {
+      console.warn(`[wgService] WireGuard interface '${interfaceName}' not available — client status will show as offline.`);
+      _wgShowWarned = true;
+    }
     return new Map();
   }
 }
