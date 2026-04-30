@@ -134,4 +134,8 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
-\n# Database files\nvpn.db\n*.db\n*.sqlite\n*.sqlite3
+# Database files
+vpn.db
+*.db
+*.sqlite
+*.sqlite3
