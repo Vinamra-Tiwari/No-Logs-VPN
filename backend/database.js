@@ -33,16 +33,58 @@ async function initDB() {
   });
 
   await db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      email TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS projects (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      entry_pubkey TEXT,
+      entry_ip TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS nodes (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      public_ip TEXT NOT NULL,
+      ssh_port INTEGER DEFAULT 22,
+      ssh_username TEXT DEFAULT 'root',
+      ssh_private_key_encrypted TEXT NOT NULL,
+      provider TEXT,
+      region TEXT,
+      role TEXT,
+      status TEXT DEFAULT 'pending',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS clients (
       id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
       name TEXT NOT NULL,
       public_key TEXT NOT NULL,
-      private_key_enc TEXT NOT NULL,
-      ip_address TEXT NOT NULL UNIQUE,
+      private_key_encrypted TEXT NOT NULL,
+      assigned_ip TEXT NOT NULL,
+      expires_at DATETIME,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      active INTEGER DEFAULT 1
+      FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
     );
-    -- Note: Optional zero-storage mode in future could make private_key_enc nullable.
+
+    CREATE TABLE IF NOT EXISTS routes (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL,
+      node_sequence TEXT NOT NULL, -- JSON array of node IDs
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE
+    );
   `);
 
   return db;

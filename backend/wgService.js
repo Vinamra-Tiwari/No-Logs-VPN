@@ -133,7 +133,7 @@ async function parseWgShow(interfaceName) {
 // ── Allocate next available IP ──
 function allocateIp(clients) {
   const usedLastOctets = clients
-    .map(c => c.ip_address)
+    .map(c => c.assigned_ip)
     .filter(ip => ip && ip.startsWith('10.20.20.'))
     .map(ip => parseInt(ip.split('.')[3], 10))
     .filter(num => !isNaN(num));

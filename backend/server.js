@@ -2,10 +2,10 @@ const express = require("express");
 const cors = require("cors");
 const crypto = require("crypto");
 const path = require("path");
-const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const { initDB, getDb, encrypt, decrypt } = require("./database");
 const wgService = require("./wgService");
+const { deployProject } = require("./deployEngine");
 
 require('dotenv').config();
 
@@ -36,192 +36,205 @@ function authenticateToken(req, res, next) {
 
 app.post("/api/admin/login", async (req, res) => {
   const { password } = req.body;
-  // In a real DB we'd fetch the user's hash. Here we use the env password for MVP.
-  // We can simulate a bcrypt check if we stored the hash in env, but for MVP we just compare.
-  // Or we could enforce the env to be a hash. Let's just compare plaintext for MVP to save time,
-  // or hash the .env password in memory and compare. Let's do simple compare for MVP.
   if (password === ADMIN_PASSWORD) {
-    const token = jwt.sign({ role: 'admin' }, JWT_SECRET, { expiresIn: '24h' });
+    const token = jwt.sign({ role: 'admin', id: 'admin_user' }, JWT_SECRET, { expiresIn: '24h' });
     res.json({ token });
   } else {
     res.status(401).json({ error: "Invalid password" });
   }
 });
 
-// ── CLIENT ROUTES ──
+// ── PROJECT ROUTES ──
 
-// Get all clients + status
-app.get("/api/clients", authenticateToken, async (req, res) => {
+app.get("/api/projects", authenticateToken, async (req, res) => {
   try {
     const db = getDb();
-    const clients = await db.all("SELECT id, name, public_key, ip_address, created_at, active FROM clients ORDER BY created_at DESC");
-    
-    // Fetch live stats from WireGuard
-    const wgStatus = await wgService.parseWgShow('wg1');
-
-    const clientsWithStatus = clients.map(client => {
-      const stats = wgStatus.get(client.public_key) || {
-        latestHandshake: 0,
-        rx: 0,
-        tx: 0,
-        online: false
-      };
-      return { ...client, stats };
-    });
-
-    res.json({ clients: clientsWithStatus });
+    const projects = await db.all("SELECT * FROM projects WHERE user_id = ?", [req.user.id]);
+    res.json({ projects });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// Create a new client
-app.post("/api/clients", authenticateToken, async (req, res) => {
+app.post("/api/projects", authenticateToken, async (req, res) => {
+  try {
+    const { name } = req.body;
+    const db = getDb();
+    const id = crypto.randomUUID();
+    await db.run("INSERT INTO projects (id, user_id, name) VALUES (?, ?, ?)", [id, req.user.id, name]);
+    res.json({ id, name });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── NODE ROUTES ──
+
+app.get("/api/projects/:projectId/nodes", authenticateToken, async (req, res) => {
+  try {
+    const db = getDb();
+    const nodes = await db.all("SELECT id, project_id, name, public_ip, ssh_port, ssh_username, provider, region, role, status, created_at FROM nodes WHERE project_id = ?", [req.params.projectId]);
+    res.json({ nodes });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/projects/:projectId/nodes", authenticateToken, async (req, res) => {
+  try {
+    const { name, public_ip, ssh_port, ssh_username, ssh_private_key, provider, region, role } = req.body;
+    const db = getDb();
+    const id = crypto.randomUUID();
+    const encryptedKey = encrypt(ssh_private_key);
+    
+    await db.run(
+      "INSERT INTO nodes (id, project_id, name, public_ip, ssh_port, ssh_username, ssh_private_key_encrypted, provider, region, role) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      [id, req.params.projectId, name, public_ip, ssh_port || 22, ssh_username || 'root', encryptedKey, provider, region, role]
+    );
+    res.json({ id, name, public_ip, status: 'pending' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/nodes/:id/test", authenticateToken, async (req, res) => {
+  try {
+    const db = getDb();
+    const node = await db.get("SELECT * FROM nodes WHERE id = ?", [req.params.id]);
+    if (!node) return res.status(404).json({ error: "Node not found" });
+
+    const SSHEngine = require('./sshEngine');
+    const engine = new SSHEngine(node);
+    await engine.connect(decrypt(node.ssh_private_key_encrypted));
+    const result = await engine.execCommand('echo "SSH Connection Successful"');
+    engine.disconnect();
+
+    res.json({ success: true, message: result.stdout.trim() });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── ROUTE BUILDER & DEPLOY ──
+
+app.post("/api/projects/:projectId/routes", authenticateToken, async (req, res) => {
+  try {
+    const { node_sequence } = req.body; // Array of node IDs
+    const db = getDb();
+    const id = crypto.randomUUID();
+    
+    // For simplicity, overwrite existing route for the project
+    await db.run("DELETE FROM routes WHERE project_id = ?", [req.params.projectId]);
+    await db.run(
+      "INSERT INTO routes (id, project_id, node_sequence) VALUES (?, ?, ?)",
+      [id, req.params.projectId, JSON.stringify(node_sequence)]
+    );
+    res.json({ id, project_id: req.params.projectId, node_sequence });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/projects/:projectId/deploy", authenticateToken, async (req, res) => {
+  try {
+    const result = await deployProject(req.params.projectId);
+    res.json(result);
+  } catch (err) {
+    console.error("Deploy failed:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── CLIENT ROUTES ──
+
+app.get("/api/projects/:projectId/clients", authenticateToken, async (req, res) => {
+  try {
+    const db = getDb();
+    const clients = await db.all("SELECT id, name, public_key, assigned_ip, created_at FROM clients WHERE project_id = ?", [req.params.projectId]);
+    res.json({ clients });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/projects/:projectId/clients", authenticateToken, async (req, res) => {
   try {
     const { name } = req.body;
     if (!name) return res.status(400).json({ error: "Name is required" });
 
     const db = getDb();
     
-    // Ensure serial IP allocation by wrapping in a simple lock or doing it sequentially
-    // Since node is single-threaded, if we await the DB fetch and insert, it's fairly safe,
-    // but concurrent requests might cause a race condition. Let's use a transaction-like approach.
+    const project = await db.get("SELECT * FROM projects WHERE id = ?", [req.params.projectId]);
+    if (!project || !project.entry_pubkey) {
+      return res.status(400).json({ error: "Project not deployed yet" });
+    }
+
     await db.exec('BEGIN EXCLUSIVE TRANSACTION');
     
-    const existingClients = await db.all("SELECT ip_address FROM clients");
-    
+    const existingClients = await db.all("SELECT assigned_ip FROM clients WHERE project_id = ?", [req.params.projectId]);
     const ip = wgService.allocateIp(existingClients);
     const keys = await wgService.generateKeys();
     const id = crypto.randomUUID();
     const encryptedPrivKey = encrypt(keys.privateKey);
 
     await db.run(
-      "INSERT INTO clients (id, name, public_key, private_key_enc, ip_address) VALUES (?, ?, ?, ?, ?)",
-      [id, name, keys.publicKey, encryptedPrivKey, ip]
+      "INSERT INTO clients (id, project_id, name, public_key, private_key_encrypted, assigned_ip) VALUES (?, ?, ?, ?, ?, ?)",
+      [id, req.params.projectId, name, keys.publicKey, encryptedPrivKey, ip]
     );
 
     await db.exec('COMMIT');
 
-    // Add peer to VPS WireGuard (non-blocking — won't fail the response)
-    wgService.addPeer(keys.publicKey, ip);
+    // Add peer to the Entry Node
+    try {
+      const entryNodeId = JSON.parse((await db.get("SELECT node_sequence FROM routes WHERE project_id = ?", [req.params.projectId])).node_sequence)[0];
+      const entryNode = await db.get("SELECT * FROM nodes WHERE id = ?", [entryNodeId]);
+      
+      const SSHEngine = require('./sshEngine');
+      const engine = new SSHEngine(entryNode);
+      await engine.connect(decrypt(entryNode.ssh_private_key_encrypted));
+      await engine.execCommand(`sudo wg set wg1 peer ${keys.publicKey} allowed-ips ${ip}/32`);
+      await engine.execCommand(`sudo wg-quick save wg1`);
+      engine.disconnect();
+    } catch(e) {
+      console.error("Failed to add peer on entry node", e);
+    }
 
-    // Provide the config to the frontend just this once
     const config = `[Interface]
 PrivateKey = ${keys.privateKey}
 Address = ${ip}/32
 DNS = 1.1.1.1
 
 [Peer]
-PublicKey = ${process.env.SERVER_PUBLIC_KEY || 'SERVER_PUB_KEY_PLACEHOLDER'}
+PublicKey = ${project.entry_pubkey}
 AllowedIPs = 0.0.0.0/0
-Endpoint = ${process.env.SERVER_ENDPOINT || 'vpn.example.com:51820'}
+Endpoint = ${project.entry_ip}:51821
 PersistentKeepalive = 25`;
 
-    res.json({
-      id,
-      name,
-      ip,
-      config,
-      publicKey: keys.publicKey
-    });
+    res.json({ id, name, ip, config, publicKey: keys.publicKey });
   } catch (err) {
     const db = getDb();
     try { await db.exec('ROLLBACK'); } catch(e){}
-    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// Re-download client config
-app.get("/api/clients/:id/config", authenticateToken, async (req, res) => {
-  try {
-    const db = getDb();
-    const client = await db.get("SELECT * FROM clients WHERE id = ?", [req.params.id]);
-    if (!client) return res.status(404).json({ error: "Client not found" });
-
-    const privateKey = decrypt(client.private_key_enc);
-    
-    const config = `[Interface]
-PrivateKey = ${privateKey}
-Address = ${client.ip_address}/32
-DNS = 1.1.1.1
-
-[Peer]
-PublicKey = ${process.env.SERVER_PUBLIC_KEY || 'SERVER_PUB_KEY_PLACEHOLDER'}
-AllowedIPs = 0.0.0.0/0
-Endpoint = ${process.env.SERVER_ENDPOINT || 'vpn.example.com:51820'}
-PersistentKeepalive = 25`;
-
-    res.json({ config });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Revoke client
-app.delete("/api/clients/:id", authenticateToken, async (req, res) => {
-  try {
-    const db = getDb();
-    // Fetch client first to get its public key for WG removal
-    const client = await db.get("SELECT public_key FROM clients WHERE id = ?", [req.params.id]);
-    if (!client) return res.status(404).json({ error: "Client not found" });
-
-    await db.run("DELETE FROM clients WHERE id = ?", [req.params.id]);
-    
-    // Remove peer from VPS WireGuard
-    wgService.removePeer(client.public_key);
-    
-    res.json({ success: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Stats route
-app.get("/api/stats", authenticateToken, async (req, res) => {
-  try {
-    const db = getDb();
-    const clients = await db.all("SELECT id, public_key FROM clients");
-    const wgStatus = await wgService.parseWgShow('wg1');
-    
-    let activeCount = 0;
-    let totalRx = 0;
-    let totalTx = 0;
-
-    for (const client of clients) {
-      const stats = wgStatus.get(client.public_key);
-      if (stats) {
-        if (stats.online) activeCount++;
-        totalRx += stats.rx;
-        totalTx += stats.tx;
-      }
-    }
-
-    res.json({
-      totalClients: clients.length,
-      activeClients: activeCount,
-      totalRx,
-      totalTx,
-      timestamp: Date.now()
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// The "catchall" handler: for any request that doesn't match one above, send back React's index.html file.
+// The "catchall" handler
 app.use((req, res) => {
   res.sendFile(path.join(__dirname, "../frontend/dist/index.html"));
 });
 
 const PORT = process.env.PORT || 5000;
+const { startCronJobs } = require('./cronJobs');
 
 initDB().then(async () => {
-  // Auto-fetch server public key from VPS if not already configured
-  await wgService.autoFetchServerKey();
+  // Ensure we have an admin user in DB
+  const db = getDb();
+  await db.run("INSERT OR IGNORE INTO users (id, email, password_hash) VALUES ('admin_user', 'admin@nexus.local', 'mockhash')");
+
+  startCronJobs();
 
   app.listen(PORT, () => {
-    console.log(`🚀 Nexus VPN Admin Backend running on http://localhost:${PORT}`);
+    console.log(`🚀 Nexus Orchestrator running on http://localhost:${PORT}`);
   });
 }).catch(err => {
   console.error("Failed to initialize DB:", err);

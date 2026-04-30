@@ -1,87 +1,90 @@
-const BASE_URL = window.location.origin;
+const BASE_URL = window.location.origin.includes('localhost') ? 'http://localhost:5000/api' : '/api';
+
+function getHeaders() {
+  const token = localStorage.getItem('nexus_token');
+  return {
+    'Content-Type': 'application/json',
+    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+  };
+}
 
 async function safeFetch(url, options = {}) {
   try {
-    const res = await fetch(url, options);
+    const res = await fetch(url, { ...options, headers: { ...getHeaders(), ...options.headers } });
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
       throw { status: res.status, ...data };
     }
     return await res.json();
   } catch (err) {
+    if (err.status === 401 || err.status === 403) {
+      localStorage.removeItem('nexus_token');
+      window.location.href = '/login';
+    }
     if (err.status) throw err;
     throw { status: 0, error: "Network error", offline: true };
   }
 }
 
-// Session
-export const createSession = () =>
-  safeFetch(`${BASE_URL}/api/session/create`, { method: "POST" });
-
-export const getSession = (id) =>
-  safeFetch(`${BASE_URL}/api/session/${id}`);
-
-export const extendSession = (sessionId) =>
-  safeFetch(`${BASE_URL}/api/session/extend`, {
+// Auth
+export const loginAdmin = (password) =>
+  safeFetch(`${BASE_URL}/admin/login`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ sessionId }),
+    body: JSON.stringify({ password }),
   });
 
-// Connection
-export const connect = (sessionId, serverCode) =>
-  safeFetch(`${BASE_URL}/api/connect`, {
+// Projects
+export const getProjects = () =>
+  safeFetch(`${BASE_URL}/projects`);
+
+export const createProject = (name) =>
+  safeFetch(`${BASE_URL}/projects`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ sessionId, serverCode }),
+    body: JSON.stringify({ name }),
   });
 
-export const disconnect = (sessionId) =>
-  safeFetch(`${BASE_URL}/api/disconnect`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ sessionId }),
+export const deployProject = (projectId) =>
+  safeFetch(`${BASE_URL}/projects/${projectId}/deploy`, {
+    method: "POST"
   });
-
-// Metrics
-export const getMetrics = (sessionId) =>
-  safeFetch(`${BASE_URL}/api/metrics/${sessionId}`);
 
 // Nodes
-export const getNodes = () =>
-  safeFetch(`${BASE_URL}/api/nodes`);
+export const getNodes = (projectId) =>
+  safeFetch(`${BASE_URL}/projects/${projectId}/nodes`);
 
-export const rotateNodes = () =>
-  safeFetch(`${BASE_URL}/api/nodes/rotate`, { method: "POST" });
-
-export const toggleAutoRotate = (enabled) =>
-  safeFetch(`${BASE_URL}/api/nodes/auto-rotate`, {
+export const createNode = (projectId, nodeData) =>
+  safeFetch(`${BASE_URL}/projects/${projectId}/nodes`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ enabled }),
+    body: JSON.stringify(nodeData),
   });
 
-// QR / Devices
-export const generatePeer = (sessionId, deviceName, deviceType) =>
-  safeFetch(`${BASE_URL}/api/generate-peer`, {
+export const testNode = (nodeId) =>
+  safeFetch(`${BASE_URL}/nodes/${nodeId}/test`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ sessionId, deviceName, deviceType }),
   });
 
-export const getDevices = (sessionId) =>
-  safeFetch(`${BASE_URL}/api/devices/${sessionId}`);
-
-export const revokeDevice = (sessionId, deviceId) =>
-  safeFetch(`${BASE_URL}/api/devices/revoke`, {
+// Routes
+export const saveRoute = (projectId, nodeSequence) =>
+  safeFetch(`${BASE_URL}/projects/${projectId}/routes`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ sessionId, deviceId }),
+    body: JSON.stringify({ node_sequence: nodeSequence }),
   });
 
-// Privacy & Health
-export const getPrivacyStatus = () =>
-  safeFetch(`${BASE_URL}/api/privacy-status`);
+// Clients (QR Provisioning)
+export const getClients = (projectId) =>
+  safeFetch(`${BASE_URL}/projects/${projectId}/clients`);
 
-export const healthCheck = () =>
-  safeFetch(`${BASE_URL}/api/health`);
+export const createClient = (projectId, name) =>
+  safeFetch(`${BASE_URL}/projects/${projectId}/clients`, {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+
+export const revokeClient = (clientId) =>
+  safeFetch(`${BASE_URL}/clients/${clientId}`, {
+    method: "DELETE",
+  });
+
+// Stats
+export const getStats = () =>
+  safeFetch(`${BASE_URL}/stats`);
