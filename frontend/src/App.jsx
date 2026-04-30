@@ -2,6 +2,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { AuthProvider, useAuth } from './context/AuthContext';
 import Login from './components/Login';
 import AdminDashboard from './components/AdminDashboard';
+import Documentation from './components/Documentation';
 import './App.css';
 
 const ProtectedRoute = ({ children }) => {
@@ -23,6 +24,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <AdminDashboard />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/docs" 
+        element={
+          <ProtectedRoute>
+            <Documentation />
           </ProtectedRoute>
         } 
       />

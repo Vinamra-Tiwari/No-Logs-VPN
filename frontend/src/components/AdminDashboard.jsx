@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Shield, Plus, Trash2, QrCode, Download, Activity, Users, ArrowUpRight, ArrowDownRight, Server, X, AlertTriangle, Copy, CheckCircle, Clock } from 'lucide-react';
+import { Shield, Plus, Trash2, QrCode, Download, Activity, Users, ArrowUpRight, ArrowDownRight, Server, X, AlertTriangle, Copy, CheckCircle, Clock, BookOpen } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -11,6 +12,7 @@ import ConnectionThreatPanel from './dashboard/ConnectionThreatPanel';
 import DeviceTable from './dashboard/DeviceTable';
 
 export default function AdminDashboard() {
+  const navigate = useNavigate();
   const { token, logout } = useAuth();
   const [clients, setClients] = useState([]);
   const [stats, setStats] = useState({ totalClients: 0, activeClients: 0, totalRx: 0, totalTx: 0, entryNode: 'Singapore', exitNode: 'Germany' });
@@ -247,12 +249,21 @@ export default function AdminDashboard() {
               </div>
             </div>
           </div>
-          <button 
-            onClick={logout}
-            className="px-4 py-2 text-xs font-mono text-slate-400 hover:text-white border border-slate-700 hover:border-slate-500 rounded-lg transition-colors uppercase tracking-wider"
-          >
-            Disconnect
-          </button>
+          <div className="flex items-center gap-3">
+            <button 
+              onClick={() => navigate('/docs')}
+              className="flex items-center gap-2 px-4 py-2 text-xs font-mono text-cyan-400 hover:text-cyan-300 border border-cyan-900 hover:border-cyan-700 bg-cyan-950/30 rounded-lg transition-colors uppercase tracking-wider"
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              Documentation
+            </button>
+            <button 
+              onClick={logout}
+              className="px-4 py-2 text-xs font-mono text-slate-400 hover:text-white border border-slate-700 hover:border-slate-500 rounded-lg transition-colors uppercase tracking-wider"
+            >
+              Disconnect
+            </button>
+          </div>
         </div>
 
         {/* Centerpiece Map */}
