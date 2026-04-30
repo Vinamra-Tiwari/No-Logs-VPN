@@ -270,7 +270,7 @@ initDB().then(async () => {
   // Auto-fetch server public key from VPS if not already configured
   await wgService.autoFetchServerKey();
 
-  app.listen(PORT, () => {
+  app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Nexus VPN Admin Backend running on http://localhost:${PORT}`);
     
     // Background Task: Automated Key Rotation
