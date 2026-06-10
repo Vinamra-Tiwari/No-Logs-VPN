@@ -128,13 +128,14 @@ export const mockApi = {
             type: 'mobile',
             config: `[Interface]
 PrivateKey = ${Math.random().toString(36).substring(2, 32)}
-Address = 10.0.0.2/32
+Address = 10.0.0.2/24
 DNS = 1.1.1.1
 
 [Peer]
 PublicKey = ${Math.random().toString(36).substring(2, 32)}
 Endpoint = 45.76.187.90:51821
-AllowedIPs = 0.0.0.0/0`,
+AllowedIPs = 0.0.0.0/0
+PersistentKeepalive = 25`,
             expiresAt: Date.now() + 2 * 60 * 1000 // 2 minutes expiry
         };
         devices.push(device);

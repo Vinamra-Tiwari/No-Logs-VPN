@@ -36,7 +36,7 @@ function authenticateToken(req, res, next) {
 function generateWgConfig(privateKey, ip, killSwitch) {
   let config = `[Interface]
 PrivateKey = ${privateKey}
-Address = ${ip}/32
+Address = ${ip}/24
 DNS = 1.1.1.1
 `;
   if (killSwitch) {
