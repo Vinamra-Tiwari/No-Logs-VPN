@@ -8,18 +8,18 @@ const LATENCY_RANGE = [20, 150];
 const SPEED_RANGE = [50, 500];
 
 export const servers = [
-    { id: 'in-1', country: "India", city: "Mumbai", code: "IN", flag: "🇮🇳", region: "Asia Pacific", load: 24, tags: ["Low Latency", "Multi-Hop"] },
-    { id: 'ch-1', country: "Switzerland", city: "Zürich", code: "CH", flag: "🇨🇭", region: "Europe", load: 12, tags: ["Privacy First", "Multi-Hop"] },
+    { id: 'sg-1', country: "Singapore", city: "Singapore", code: "SG", flag: "🇸🇬", region: "Asia Pacific", load: 24, tags: ["Low Latency", "Entry Node"] },
+    { id: 'de-1', country: "Germany", city: "Frankfurt", code: "DE", flag: "🇩🇪", region: "Europe", load: 12, tags: ["Privacy First", "Exit Node"] },
 ];
 
 const nodePool = {
     entry: [
-        { id: "relay-mum", provider: "Nexus Relay", location: "Mumbai", ip: "103.21.52.12" },
-        { id: "relay-zrh", provider: "Nexus Relay", location: "Zürich", ip: "185.19.28.44" },
+        { id: "relay-sg", provider: "Nexus Relay", location: "Singapore", ip: "45.76.187.90" },
+        { id: "relay-de", provider: "Nexus Relay", location: "Germany", ip: "46.224.234.192" },
     ],
     exit: [
-        { id: "exit-mum", provider: "Nexus Exit", location: "Mumbai", ip: "103.21.52.88" },
-        { id: "exit-zrh", provider: "Nexus Exit", location: "Zürich", ip: "185.19.28.102" },
+        { id: "exit-sg", provider: "Nexus Exit", location: "Singapore", ip: "45.76.187.90" },
+        { id: "exit-de", provider: "Nexus Exit", location: "Germany", ip: "46.224.234.192" },
     ],
 };
 
@@ -133,7 +133,7 @@ DNS = 1.1.1.1
 
 [Peer]
 PublicKey = ${Math.random().toString(36).substring(2, 32)}
-Endpoint = 103.21.52.88:51820
+Endpoint = 45.76.187.90:51821
 AllowedIPs = 0.0.0.0/0`,
             expiresAt: Date.now() + 2 * 60 * 1000 // 2 minutes expiry
         };
