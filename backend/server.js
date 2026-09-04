@@ -6,6 +6,7 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const { initDB, getDb, encrypt, decrypt } = require("./database");
 const wgService = require("./wgService");
+const blockchain = require("./blockchain");
 
 require('dotenv').config();
 
@@ -105,6 +106,12 @@ app.post("/api/clients", authenticateToken, async (req, res) => {
     // Add peer to VPS WireGuard (non-blocking — won't fail the response)
     wgService.addPeer(keys.publicKey, ip);
 
+    // Anchor key lifecycle event on-chain (0 = provisioned)
+    // Computes SHA-256 hash internally; no raw public key or private key touches the blockchain
+    blockchain.anchorKeyEvent(keys.publicKey, blockchain.EVENT_TYPES.PROVISIONED).catch(err => {
+      console.warn('[server] Error anchoring provision event:', err.message);
+    });
+
     // Provide the config to the frontend just this once
     const config = `[Interface]
 PrivateKey = ${keys.privateKey}
@@ -162,7 +169,7 @@ PersistentKeepalive = 25`;
 app.delete("/api/clients/:id", authenticateToken, async (req, res) => {
   try {
     const db = getDb();
-    // Fetch client first to get its public key for WG removal
+    // Fetch client first to get its public key for WG removal and key anchoring
     const client = await db.get("SELECT public_key FROM clients WHERE id = ?", [req.params.id]);
     if (!client) return res.status(404).json({ error: "Client not found" });
 
@@ -170,12 +177,46 @@ app.delete("/api/clients/:id", authenticateToken, async (req, res) => {
     
     // Remove peer from VPS WireGuard
     wgService.removePeer(client.public_key);
+
+    // Anchor key lifecycle event on-chain (2 = revoked)
+    blockchain.anchorKeyEvent(client.public_key, blockchain.EVENT_TYPES.REVOKED).catch(err => {
+      console.warn('[server] Error anchoring revoke event:', err.message);
+    });
     
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
+
+// ── AUDIT TRAIL ROUTE ──
+
+// Returns on-chain event history for a peer's key hash, decoded from contract events
+const handleAuditTrail = async (req, res) => {
+  try {
+    const db = getDb();
+    const client = await db.get("SELECT id, name, public_key, ip_address, created_at FROM clients WHERE id = ?", [req.params.id]);
+    if (!client) return res.status(404).json({ error: "Peer not found" });
+
+    const keyHash = blockchain.hashPublicKey(client.public_key);
+    const events = await blockchain.getKeyHistory(client.public_key);
+    const eventCount = await blockchain.getEventCount(client.public_key);
+
+    res.json({
+      peerId: client.id,
+      name: client.name,
+      publicKeyHash: keyHash,
+      eventCount,
+      events,
+    });
+  } catch (err) {
+    console.error('[server] Failed to fetch audit trail:', err);
+    res.status(500).json({ error: err.message });
+  }
+};
+
+app.get("/api/peers/:id/audit-trail", authenticateToken, handleAuditTrail);
+app.get("/api/clients/:id/audit-trail", authenticateToken, handleAuditTrail);
 
 // Stats route
 app.get("/api/stats", authenticateToken, async (req, res) => {

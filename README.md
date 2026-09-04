@@ -103,6 +103,54 @@ cd ../backend
 npm start
 ```
 
+---
+
+## ⛓️ Blockchain-Anchored Audit Ledger
+
+The platform features an immutable, cryptographic audit ledger for WireGuard peer key lifecycle transitions (`Provisioned`, `Rotated`, `Revoked`) powered by a local Ethereum smart contract (`KeyLedger.sol`).
+
+### 1. What's Anchored (Zero-Knowledge Privacy)
+
+To uphold the strict no-logs and privacy model:
+- **Never on-chain:** Private keys and raw public keys are **never** written or emitted to the blockchain.
+- **Anchored on-chain:**
+  - **`keyHash` (`bytes32`)**: Standard SHA-256 digest of the peer's public key (`SHA-256(pubKey)`).
+  - **`eventType` (`uint8`)**: Key lifecycle state:
+    - `0` = **Provisioned** (initial peer onboarding)
+    - `1` = **Rotated** (key rotation / re-keying)
+    - `2` = **Revoked** (peer access termination)
+  - **`timestamp` (`uint256`)**: Event occurrence timestamp in seconds.
+
+### 2. Why: Tamper-Evidence & Non-Repudiation
+
+Traditional database logs (e.g. SQLite, PostgreSQL) can be modified, backdated, or wiped by an attacker or compromised database administrator. Anchoring key lifecycle transitions to an immutable Ethereum ledger provides:
+- **Tamper-Evidence:** Any attempt to alter historical key records or deny when a peer was revoked will fail cryptographic verification against the smart contract event log.
+- **Non-Repudiation:** Cryptographically proves that a given key was authorized at a specific point in time and explicitly revoked at a recorded block and transaction hash.
+- **Decoupled Verification:** Anyone with the client's public key can hash it and independently verify its on-chain history via `GET /api/peers/:id/audit-trail` or by querying the contract directly.
+
+### 3. How to Run the Local Chain Alongside Dev Setup
+
+Run the local Hardhat node and deploy the smart contract before or alongside the backend:
+
+```bash
+# Terminal 1: Start the local Ethereum Hardhat chain
+npx hardhat node
+
+# Terminal 2: Deploy the KeyLedger contract
+npx hardhat run scripts/deploy.js --network localhost
+# (This deploys KeyLedger.sol and automatically writes contractAddress.json into /backend)
+
+# Terminal 3: Start the Express backend
+cd backend
+npm start
+
+# Terminal 4: Start the React frontend
+cd frontend
+npm run dev
+```
+
+> **Resilience Note:** If the local Hardhat chain is offline during development, the backend will log a clear notice and continue servicing VPN connections without interruption (fault-tolerant & additive).
+
 ## 🔐 Security Considerations
 
 - **Least Privilege:** The application relies on tightly scoped `sudo` commands.

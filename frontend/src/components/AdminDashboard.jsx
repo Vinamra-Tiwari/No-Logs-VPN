@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Shield, Plus, Trash2, QrCode, Download, Activity, Users, ArrowUpRight, ArrowDownRight, Server, X, AlertTriangle, Copy, CheckCircle } from 'lucide-react';
+import { Shield, Plus, Trash2, QrCode, Download, Activity, Users, ArrowUpRight, ArrowDownRight, Server, X, AlertTriangle, Copy, CheckCircle, ShieldCheck } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { motion, AnimatePresence } from 'framer-motion';
+import AuditTrail from './AuditTrail';
 
 export default function AdminDashboard() {
   const { token, logout } = useAuth();
@@ -11,6 +12,7 @@ export default function AdminDashboard() {
   const [isCreateModalOpen, setCreateModalOpen] = useState(false);
   const [newClientName, setNewClientName] = useState('');
   const [qrModalData, setQrModalData] = useState(null); // { config, name }
+  const [auditPeer, setAuditPeer] = useState(null); // { id, name }
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [toast, setToast] = useState(null);
@@ -291,6 +293,13 @@ export default function AdminDashboard() {
                     </td>
                     <td className="px-6 py-4 flex justify-end gap-3">
                       <button 
+                        onClick={() => setAuditPeer(client)}
+                        className="text-slate-400 hover:text-emerald-400 transition-colors"
+                        title="View On-Chain Audit Trail"
+                      >
+                        <ShieldCheck className="w-5 h-5" />
+                      </button>
+                      <button 
                         onClick={() => handleShowQR(client.id, client.name)}
                         className="text-slate-400 hover:text-purple-400 transition-colors"
                         title="Show QR Code"
@@ -428,6 +437,17 @@ export default function AdminDashboard() {
               </div>
             </motion.div>
           </div>
+        )}
+      </AnimatePresence>
+
+      {/* On-Chain Audit Trail Modal */}
+      <AnimatePresence>
+        {auditPeer && (
+          <AuditTrail
+            peerId={auditPeer.id}
+            peerName={auditPeer.name}
+            onClose={() => setAuditPeer(null)}
+          />
         )}
       </AnimatePresence>
 
